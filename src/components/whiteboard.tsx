@@ -384,21 +384,59 @@ export default function Whiteboard({
     }
 
     setIsLoading(true)
+    console.log('Starting save operation for:', whiteboardName)
+    
     try {
       const canvas = canvasXRef.current as Record<string, unknown>
       
+      // Check canvas state before saving
+      console.log('Canvas state before save:', {
+        hasToJSON: !!canvas.toJSON,
+        hasToDataURL: !!canvas.toDataURL,
+        objectCount: canvas.getObjects ? (canvas.getObjects as () => unknown[])().length : 'unknown'
+      })
+      
       // Get canvas data as JSON string
       let canvasData = '{}'
+      let canvasObject: object = {}
+      
       if (canvas.toJSON) {
-        const canvasObject = (canvas.toJSON as () => object)()
-        canvasData = JSON.stringify(canvasObject)
-        console.log('Canvas data serialized, length:', canvasData.length)
+        try {
+          canvasObject = (canvas.toJSON as () => object)()
+          canvasData = JSON.stringify(canvasObject)
+          console.log('Canvas data serialized successfully:', {
+            length: canvasData.length,
+            hasObjects: canvasData.includes('"objects"'),
+            preview: canvasData.substring(0, 200) + '...'
+          })
+        } catch (serializeError) {
+          console.error('Canvas serialization failed:', serializeError)
+          throw new Error(`Failed to serialize canvas: ${serializeError instanceof Error ? serializeError.message : 'Unknown error'}`)
+        }
       } else {
         console.warn('Canvas toJSON method not available')
+        throw new Error('Canvas does not support serialization')
       }
       
       // Generate thumbnail
-      const thumbnail = canvas.toDataURL ? (canvas.toDataURL as (format: string) => string)('image/png') : ''
+      let thumbnail = ''
+      if (canvas.toDataURL) {
+        try {
+          thumbnail = (canvas.toDataURL as (format: string) => string)('image/png')
+          console.log('Thumbnail generated, size:', thumbnail.length)
+        } catch (thumbnailError) {
+          console.warn('Failed to generate thumbnail:', thumbnailError)
+          // Continue without thumbnail
+        }
+      } else {
+        console.warn('Canvas toDataURL method not available')
+      }
+
+      console.log('Preparing to send request with:', {
+        name: whiteboardName,
+        canvasDataLength: canvasData.length,
+        thumbnailLength: thumbnail.length
+      })
 
       const response = await fetch('/api/whiteboards', {
         method: 'POST',
@@ -412,8 +450,11 @@ export default function Whiteboard({
         }),
       })
 
+      console.log('API response status:', response.status)
+
       if (response.ok) {
-        await response.json()
+        const result = await response.json()
+        console.log('Save successful:', result)
         alert('Whiteboard saved successfully!')
         setWhiteboardName('')
         setShowSaveDialog(false)
@@ -422,14 +463,31 @@ export default function Whiteboard({
           loadWhiteboardsList()
         }
       } else {
-        const error = await response.json()
-        alert(`Failed to save: ${error.error}`)
+        let errorMessage = 'Unknown error'
+        try {
+          const errorData = await response.json()
+          errorMessage = errorData.error || errorData.message || `HTTP ${response.status}`
+          console.error('API error response:', errorData)
+        } catch (parseError) {
+          console.error('Failed to parse error response:', parseError)
+          errorMessage = `HTTP ${response.status}: ${response.statusText}`
+        }
+        
+        console.error('Save failed with status:', response.status, errorMessage)
+        alert(`Failed to save whiteboard: ${errorMessage}`)
       }
     } catch (error) {
-      console.error('Save error:', error)
-      alert('Failed to save whiteboard')
+      console.error('Save error (full details):', {
+        error,
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined
+      })
+      
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
+      alert(`Failed to save whiteboard: ${errorMessage}`)
     } finally {
       setIsLoading(false)
+      console.log('Save operation completed')
     }
   }
 
