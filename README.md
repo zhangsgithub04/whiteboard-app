@@ -1,4 +1,6 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Digital Whiteboard App
+
+This is a React Next.js project with shadcn/ui that features a digital whiteboard canvas using [@boardxus/canvasx](https://www.npmjs.com/package/@boardxus/canvasx).
 
 ## Getting Started
 
@@ -16,9 +18,55 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Features
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- **Digital Whiteboard**: Interactive canvas powered by CanvasX
+- **Drawing Tools**: Freehand drawing with customizable brush (press Esc to exit drawing mode)
+- **Shapes**: Add rectangles and circles to the canvas
+- **Text**: Add text elements with custom styling
+- **Images**: Upload and display images on the canvas
+- **Charts**: Add sample chart visualizations
+- **Save/Load**: Save whiteboards to MongoDB and load from a list
+- **Selection Mode**: Select and manipulate objects on the canvas
+- **Clear Canvas**: Reset the whiteboard to start fresh
+- **Responsive Design**: Built with Tailwind CSS and shadcn/ui components
+
+## Tech Stack
+
+- **Next.js 15** - React framework with App Router
+- **TypeScript** - Type-safe JavaScript
+- **Tailwind CSS** - Utility-first CSS framework
+- **shadcn/ui** - Modern UI components
+- **@boardxus/canvasx** - Canvas library for whiteboard functionality
+- **MongoDB** - Database for storing whiteboard data
+- **Mongoose** - MongoDB object modeling
+
+## MongoDB Setup
+
+This app requires MongoDB to save and load whiteboards.
+
+### Option 1: Local MongoDB (Recommended for development)
+
+1. Install MongoDB locally
+2. Start MongoDB service
+3. Create a `.env.local` file in the root directory:
+```env
+MONGODB_URI=mongodb://localhost:27017/whiteboard-app
+```
+
+### Option 2: MongoDB Atlas (Cloud)
+
+1. Create a free account at [MongoDB Atlas](https://www.mongodb.com/cloud/atlas)
+2. Create a new cluster
+3. Get your connection string
+4. Create a `.env.local` file in the root directory:
+```env
+MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/whiteboard-app
+```
+
+### Environment Variables
+
+Copy `.env.example` to `.env.local` and update the `MONGODB_URI` with your MongoDB connection string.
 
 ## Learn More
 
