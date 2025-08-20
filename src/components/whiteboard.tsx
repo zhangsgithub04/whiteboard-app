@@ -1,12 +1,284 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
+import Image from 'next/image'
 
 
 interface WhiteboardProps {
   width?: number
   height?: number
   className?: string
+}
+
+// Manual canvas loading function - more reliable than loadFromJSON
+const loadCanvasManually = async (canvas: Record<string, unknown>, canvasData: string, canvasRef: Record<string, unknown> | null): Promise<boolean> => {
+  try {
+    console.log('=== Starting manual canvas loading ===')
+    console.log('Canvas state at start:', {
+      hasCanvas: !!canvas,
+      hasCanvasRef: !!canvasRef,
+      canvasType: canvas.constructor?.name || 'Unknown'
+    })
+    
+    // Parse the canvas data
+    let parsedData
+    try {
+      parsedData = typeof canvasData === 'string' ? JSON.parse(canvasData) : canvasData
+      console.log('Successfully parsed canvas data')
+    } catch (parseError) {
+      console.error('Failed to parse canvas data:', parseError)
+      return false
+    }
+    
+    if (!parsedData || typeof parsedData !== 'object') {
+      console.error('Invalid parsed data:', parsedData)
+      return false
+    }
+    
+    console.log('Parsed canvas data details:', {
+      hasObjects: !!parsedData.objects,
+      objectCount: Array.isArray(parsedData.objects) ? parsedData.objects.length : 0,
+      hasBackground: !!parsedData.background,
+      dataKeys: Object.keys(parsedData)
+    })
+    
+    if (Array.isArray(parsedData.objects) && parsedData.objects.length > 0) {
+      console.log('First few objects:', parsedData.objects.slice(0, 3))
+    }
+    
+    // Set canvas background
+    if (parsedData.background) {
+      canvas.backgroundColor = parsedData.background
+      console.log('Set canvas background:', parsedData.background)
+    }
+    
+    // Load objects manually
+    if (Array.isArray(parsedData.objects)) {
+      console.log(`=== Loading ${parsedData.objects.length} objects manually ===`)
+      
+      let successCount = 0
+      let failCount = 0
+      
+      for (let i = 0; i < parsedData.objects.length; i++) {
+        const obj = parsedData.objects[i]
+        console.log(`Loading object ${i + 1}/${parsedData.objects.length}:`, {
+          type: obj.type,
+          left: obj.left,
+          top: obj.top,
+          width: obj.width,
+          height: obj.height
+        })
+        
+        try {
+          // Add object based on type
+          if (obj.type === 'rect') {
+            await addRectToCanvas(canvas, obj, canvasRef)
+            successCount++
+          } else if (obj.type === 'circle') {
+            await addCircleToCanvas(canvas, obj, canvasRef)
+            successCount++
+          } else if (obj.type === 'text' || obj.type === 'i-text') {
+            await addTextToCanvas(canvas, obj, canvasRef)
+            successCount++
+          } else if (obj.type === 'path') {
+            // Free drawing paths - try to recreate
+            await addPathToCanvas(canvas, obj, canvasRef)
+            successCount++
+          } else if (obj.type === 'line' || obj.type === 'connector' || obj.type === 'xconnector') {
+            // Connectors and lines
+            await addConnectorToCanvas(canvas, obj, canvasRef)
+            successCount++
+          } else {
+            console.warn(`Unknown object type: ${obj.type}`)
+            failCount++
+          }
+          
+          // Force render after each object for debugging
+          if (canvas.renderAll) {
+            ;(canvas.renderAll as () => void)()
+          }
+          
+          // Check current object count
+          const currentCount = canvas.getObjects ? (canvas.getObjects as () => unknown[])().length : 0
+          console.log(`After loading object ${i + 1}: canvas now has ${currentCount} objects`)
+          
+        } catch (error) {
+          console.error(`Failed to load object ${i + 1}:`, error)
+          failCount++
+        }
+      }
+      
+      console.log(`=== Object loading complete: ${successCount} success, ${failCount} failed ===`)
+    } else {
+      console.warn('No objects array found in parsed data')
+    }
+    
+    // Force render
+    setTimeout(() => {
+      if (canvas.renderAll) {
+        (canvas.renderAll as () => void)()
+      }
+      
+      // Check final state
+      const finalCount = canvas.getObjects ? (canvas.getObjects as () => unknown[])().length : 0
+      console.log(`Manual loading complete. Final object count: ${finalCount}`)
+    }, 100)
+    
+    return true
+  } catch (error) {
+    console.error('Manual loading failed:', error)
+    return false
+  }
+}
+
+// Helper functions for adding different object types
+const addRectToCanvas = async (canvas: Record<string, unknown>, obj: Record<string, unknown>, canvasRef: Record<string, unknown> | null) => {
+  try {
+    console.log('Adding rectangle with props:', {
+      left: obj.left,
+      top: obj.top,
+      width: obj.width,
+      height: obj.height,
+      fill: obj.fill,
+      stroke: obj.stroke
+    })
+    
+    // Get the stored Rect constructor
+    const RectClass = canvasRef?.Rect as new (props: Record<string, unknown>) => unknown
+    if (RectClass) {
+      const rect = new RectClass({
+        left: obj.left || 0,
+        top: obj.top || 0,
+        width: obj.width || 100,
+        height: obj.height || 100,
+        fill: obj.fill || 'transparent',
+        stroke: obj.stroke || '#000000',
+        strokeWidth: obj.strokeWidth || 1,
+        selectable: obj.selectable !== false,
+        visible: obj.visible !== false
+      })
+      
+      console.log('Created rectangle object:', rect)
+      
+      if (canvas.add) {
+        (canvas.add as (obj: unknown) => void)(rect)
+        console.log('Successfully added rectangle to canvas')
+      } else {
+        throw new Error('Canvas add method not available')
+      }
+    } else {
+      throw new Error('Rect constructor not available')
+    }
+  } catch (error) {
+    console.error('Failed to add rectangle:', error)
+    throw error
+  }
+}
+
+const addCircleToCanvas = async (canvas: Record<string, unknown>, obj: Record<string, unknown>, canvasRef: Record<string, unknown> | null) => {
+  try {
+    const CircleClass = canvasRef?.Circle as new (props: Record<string, unknown>) => unknown
+    if (CircleClass) {
+      const circle = new CircleClass({
+        left: obj.left || 0,
+        top: obj.top || 0,
+        radius: obj.radius || 50,
+        fill: obj.fill || 'transparent',
+        stroke: obj.stroke || '#000000',
+        strokeWidth: obj.strokeWidth || 1
+      })
+      
+      if (canvas.add) {
+        (canvas.add as (obj: unknown) => void)(circle)
+        console.log('Added circle to canvas')
+      }
+    }
+  } catch (error) {
+    console.error('Failed to add circle:', error)
+  }
+}
+
+const addTextToCanvas = async (canvas: Record<string, unknown>, obj: Record<string, unknown>, canvasRef: Record<string, unknown> | null) => {
+  try {
+    const TextClass = canvasRef?.Text as new (text: string, props: Record<string, unknown>) => unknown
+    if (TextClass) {
+      const text = new TextClass((obj.text as string) || 'Text', {
+        left: obj.left || 0,
+        top: obj.top || 0,
+        fontSize: obj.fontSize || 20,
+        fill: obj.fill || '#000000',
+        fontFamily: obj.fontFamily || 'Arial'
+      })
+      
+      if (canvas.add) {
+        (canvas.add as (obj: unknown) => void)(text)
+        console.log('Added text to canvas')
+      }
+    }
+  } catch (error) {
+    console.error('Failed to add text:', error)
+  }
+}
+
+const addPathToCanvas = async (canvas: Record<string, unknown>, obj: Record<string, unknown>, canvasRef: Record<string, unknown> | null) => {
+  try {
+    // For paths (free drawing), we might need to reconstruct them
+    // This is more complex, so we'll skip for now but log the attempt
+    console.log('Skipping path object (free drawing) - complex reconstruction needed', { 
+      canvas: !!canvas, 
+      canvasRef: !!canvasRef, 
+      pathType: obj.type 
+    })
+  } catch (error) {
+    console.error('Failed to add path:', error)
+  }
+}
+
+const addConnectorToCanvas = async (canvas: Record<string, unknown>, obj: Record<string, unknown>, canvasRef: Record<string, unknown> | null) => {
+  try {
+    const ConnectorClass = canvasRef?.Connector as new (props: Record<string, unknown>) => unknown
+    if (ConnectorClass) {
+      const connector = new ConnectorClass({
+        x1: obj.x1 || 0,
+        y1: obj.y1 || 0,
+        x2: obj.x2 || 100,
+        y2: obj.y2 || 100,
+        stroke: obj.stroke || '#000000',
+        strokeWidth: obj.strokeWidth || 2,
+        fill: obj.fill || '',
+        selectable: obj.selectable !== false
+      })
+      
+      if (canvas.add) {
+        (canvas.add as (obj: unknown) => void)(connector)
+        console.log('Added connector to canvas')
+      }
+    } else {
+      // Fallback: try Line class
+      const LineClass = canvasRef?.Line as new (points: number[], props: Record<string, unknown>) => unknown
+      if (LineClass) {
+        const line = new LineClass([
+          (obj.x1 as number) || 0, 
+          (obj.y1 as number) || 0, 
+          (obj.x2 as number) || 100, 
+          (obj.y2 as number) || 100
+        ], {
+          stroke: obj.stroke || '#000000',
+          strokeWidth: obj.strokeWidth || 2,
+          selectable: obj.selectable !== false
+        })
+        
+        if (canvas.add) {
+          (canvas.add as (obj: unknown) => void)(line)
+          console.log('Added line as connector fallback')
+        }
+      } else {
+        console.warn('No Connector or Line class available for connector object')
+      }
+    }
+  } catch (error) {
+    console.error('Failed to add connector:', error)
+  }
 }
 
 export default function Whiteboard({ 
@@ -21,12 +293,153 @@ export default function Whiteboard({
   const [textInput, setTextInput] = useState('')
   const [showTextInput, setShowTextInput] = useState(false)
   const [isDrawingMode, setIsDrawingMode] = useState(false)
+  const [isConnectorMode, setIsConnectorMode] = useState(false)
+  const [connectorStart, setConnectorStart] = useState<{x: number, y: number, object?: unknown} | null>(null)
   const [whiteboardName, setWhiteboardName] = useState('')
   const [showSaveDialog, setShowSaveDialog] = useState(false)
   const [showLoadDialog, setShowLoadDialog] = useState(false)
   const [savedWhiteboards, setSavedWhiteboards] = useState<Array<{_id: string, name: string, createdAt: string, updatedAt: string, thumbnail?: string}>>([])
   const [isLoading, setIsLoading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Create connector between two points
+  const createConnectorBetweenPoints = useCallback((start: {x: number, y: number, object?: unknown}, end: {x: number, y: number, object?: unknown}) => {
+    if (!canvasXRef.current || !start || !end) {
+      console.error('Invalid parameters for createConnectorBetweenPoints:', { start, end, canvasXRef: !!canvasXRef.current })
+      return
+    }
+    
+    // Validate that start and end have valid coordinates
+    if (typeof start.x !== 'number' || typeof start.y !== 'number' || 
+        typeof end.x !== 'number' || typeof end.y !== 'number') {
+      console.error('Invalid coordinates for connector:', { start, end })
+      return
+    }
+    
+    const canvas = canvasXRef.current as Record<string, unknown>
+    
+    try {
+      // Try to use Line class (most compatible)
+      const LineConstructor = (canvasXRef.current as Record<string, unknown>).Line as new (points: number[], props: Record<string, unknown>) => unknown
+      if (LineConstructor) {
+        const line = new LineConstructor([start.x, start.y, end.x, end.y], {
+          stroke: '#000000',
+          strokeWidth: 2,
+          selectable: true,
+          strokeDashArray: null,
+          fill: ''
+        })
+        ;(canvas.add as (obj: unknown) => void)(line)
+        
+        if (canvas.renderAll) {
+          ;(canvas.renderAll as () => void)()
+        }
+        
+        console.log('Created connector from', start, 'to', end)
+      } else {
+        // Fallback: create a rectangle line
+        const RectConstructor = (canvasXRef.current as Record<string, unknown>).Rect as new (props: Record<string, unknown>) => unknown
+        if (RectConstructor) {
+          const length = Math.sqrt(Math.pow(end.x - start.x, 2) + Math.pow(end.y - start.y, 2))
+          const angle = Math.atan2(end.y - start.y, end.x - start.x) * 180 / Math.PI
+          
+          const lineRect = new RectConstructor({
+            left: start.x,
+            top: start.y - 1,
+            width: length,
+            height: 2,
+            fill: '#000000',
+            stroke: '#000000',
+            strokeWidth: 0,
+            angle: angle,
+            originX: 'left',
+            originY: 'center',
+            selectable: true
+          })
+          
+          ;(canvas.add as (obj: unknown) => void)(lineRect)
+          
+          if (canvas.renderAll) {
+            ;(canvas.renderAll as () => void)()
+          }
+          
+          console.log('Created rectangle connector from', start, 'to', end)
+        } else {
+          console.error('No Line or Rect constructor available for connector creation')
+        }
+      }
+    } catch (error) {
+      console.error('Error creating connector:', error)
+    }
+  }, [])
+
+  // Handle connector click interactions
+  const handleConnectorClick = useCallback((e: Record<string, unknown>) => {
+    try {
+      const canvas = canvasXRef.current as Record<string, unknown>
+      
+      // Get pointer coordinates with proper fallbacks
+      let pointer = { x: 0, y: 0 }
+      if (e.pointer && typeof e.pointer === 'object') {
+        const pointerObj = e.pointer as Record<string, unknown>
+        pointer = {
+          x: typeof pointerObj.x === 'number' ? pointerObj.x : 0,
+          y: typeof pointerObj.y === 'number' ? pointerObj.y : 0
+        }
+      } else if (e.e && typeof e.e === 'object') {
+        const eventObj = e.e as Record<string, unknown>
+        if (eventObj.offsetX !== undefined && eventObj.offsetY !== undefined) {
+          pointer = {
+            x: eventObj.offsetX as number,
+            y: eventObj.offsetY as number
+          }
+        }
+      }
+      
+      if (!connectorStart) {
+        // First click - start connector
+        const clickedObject = e.target
+        setConnectorStart({
+          x: pointer.x,
+          y: pointer.y,
+          object: clickedObject !== canvas ? clickedObject : undefined
+        })
+        console.log('Connector start set at:', pointer.x, pointer.y)
+      } else {
+        // Second click - complete connector
+        const clickedObject = e.target
+        const endPoint = {
+          x: pointer.x,
+          y: pointer.y,
+          object: clickedObject !== canvas ? clickedObject : undefined
+        }
+        
+        createConnectorBetweenPoints(connectorStart, endPoint)
+        setConnectorStart(null)
+        setIsConnectorMode(false) // Exit connector mode after creating one
+      }
+    } catch (error) {
+      console.error('Error handling connector click:', error)
+    }
+  }, [connectorStart, createConnectorBetweenPoints])
+
+  // Set up canvas event handlers for interactive features
+  const setupCanvasEventHandlers = useCallback((canvas: Record<string, unknown>) => {
+    try {
+      // Mouse down event for connector creation
+      if (canvas.on) {
+        (canvas.on as (event: string, handler: (e: Record<string, unknown>) => void) => void)('mouse:down', (e: Record<string, unknown>) => {
+          if (isConnectorMode) {
+            handleConnectorClick(e)
+          }
+        })
+        
+        console.log('Canvas event handlers set up successfully')
+      }
+    } catch (error) {
+      console.error('Failed to set up canvas event handlers:', error)
+    }
+  }, [isConnectorMode, handleConnectorClick])
 
   useEffect(() => {
     const initCanvas = async () => {
@@ -56,6 +469,7 @@ export default function Whiteboard({
           canvasXRef.current.Text = (canvasModule as Record<string, unknown>).Text || (canvasModule as Record<string, unknown>).XText
           canvasXRef.current.Image = (canvasModule as Record<string, unknown>).Image || (canvasModule as Record<string, unknown>).XImage
           canvasXRef.current.Chart = (canvasModule as Record<string, unknown>).Chart || (canvasModule as Record<string, unknown>).XChart
+          canvasXRef.current.Connector = (canvasModule as Record<string, unknown>).XConnector || (canvasModule as Record<string, unknown>).Connector || (canvasModule as Record<string, unknown>).Line
           canvasXRef.current.PencilBrush = (canvasModule as Record<string, unknown>).PencilBrush
 
           // Add some default tools/functionality
@@ -89,10 +503,15 @@ export default function Whiteboard({
             hasLoadFromJSON: !!canvas.loadFromJSON,
             hasToDataURL: !!canvas.toDataURL,
             loadFromJSONType: typeof canvas.loadFromJSON,
-            canvasType: canvas.constructor.name || 'Unknown'
+            canvasType: canvas.constructor.name || 'Unknown',
+            hasConnector: !!(canvasXRef.current as Record<string, unknown>).Connector,
+            hasLine: !!(canvasXRef.current as Record<string, unknown>).Line
           })
           
           setIsCanvasReady(true)
+          // Set up canvas event handlers for interactive features
+          setupCanvasEventHandlers(canvas)
+          
           console.log('Canvas initialized successfully')
         } catch (error) {
           console.error('Failed to initialize canvas:', error)
@@ -109,7 +528,7 @@ export default function Whiteboard({
         canvasXRef.current = null
       }
     }
-  }, [width, height])
+  }, [width, height, setupCanvasEventHandlers])
 
   // Handle escape key to exit drawing mode
   useEffect(() => {
@@ -258,7 +677,7 @@ export default function Whiteboard({
         const imageUrl = e.target?.result as string
         
         // Create a native Image element first
-        const img = new Image()
+        const img = new window.Image()
         img.onload = () => {
           try {
             // Try fabric.Image.fromURL first
@@ -374,6 +793,28 @@ export default function Whiteboard({
           }
         }
       }
+    }
+  }
+
+
+  // Enable connector mode
+  const enableConnectorMode = () => {
+    setIsConnectorMode(true)
+    setIsDrawingMode(false)
+    setConnectorStart(null)
+    console.log('Connector mode enabled - click two points to create a connector')
+  }
+
+  // Toggle connector mode function
+  const addConnector = () => {
+    if (isConnectorMode) {
+      // Exit connector mode
+      setIsConnectorMode(false)
+      setConnectorStart(null)
+      console.log('Connector mode disabled')
+    } else {
+      // Enter connector mode
+      enableConnectorMode()
     }
   }
 
@@ -533,15 +974,58 @@ export default function Whiteboard({
         })
 
         // Load canvas data
-        if (canvas.loadFromJSON && data.whiteboard.canvasData) {
-          try {
-            console.log('Loading canvas data:', {
-              type: typeof data.whiteboard.canvasData,
-              length: data.whiteboard.canvasData.length,
-              preview: data.whiteboard.canvasData.substring(0, 100) + '...'
-            })
+        if (data.whiteboard.canvasData) {
+          console.log('Starting load process for whiteboard:', data.whiteboard.name)
+          console.log('Canvas data details:', {
+            type: typeof data.whiteboard.canvasData,
+            length: data.whiteboard.canvasData.length,
+            preview: data.whiteboard.canvasData.substring(0, 200) + '...'
+          })
+          
+          // Clear canvas completely before loading
+          console.log('Clearing canvas before load...')
+          if (canvas.clear) {
+            ;(canvas.clear as () => void)()
+          }
+          if (canvas.renderAll) {
+            ;(canvas.renderAll as () => void)()
+          }
+          
+          // Check canvas state after clearing
+          console.log('Canvas state after clearing:', {
+            objectCount: canvas.getObjects ? (canvas.getObjects as () => unknown[])().length : 'unknown',
+            canvasReady: !!canvas,
+            hasLoadFromJSON: !!canvas.loadFromJSON
+          })
+          
+          // First, try manual recreation (most reliable method)
+          console.log('Attempting manual loading...')
+          const success = await loadCanvasManually(canvas, data.whiteboard.canvasData, canvasXRef.current)
+          
+          if (success) {
+            console.log('Manual loading completed successfully')
+            // Force multiple renders to ensure visibility
+            setTimeout(() => {
+              if (canvas.renderAll) {
+                ;(canvas.renderAll as () => void)()
+                console.log('Final render called after manual load')
+              }
+              // Check final object count
+              const finalCount = canvas.getObjects ? (canvas.getObjects as () => unknown[])().length : 0
+              console.log(`Final object count after manual load: ${finalCount}`)
+            }, 200)
             
-            // Parse the JSON string back to object if needed
+            setShowLoadDialog(false)
+            alert(`Loaded: ${data.whiteboard.name}`)
+            return
+          } else {
+            console.warn('Manual loading failed, trying fallback methods...')
+          }
+          
+          // Fallback to loadFromJSON methods if manual loading fails
+          if (canvas.loadFromJSON) {
+            try {
+              // Parse the JSON string back to object if needed
             let canvasDataToLoad
             if (typeof data.whiteboard.canvasData === 'string') {
               canvasDataToLoad = JSON.parse(data.whiteboard.canvasData)
@@ -786,6 +1270,9 @@ export default function Whiteboard({
           }
           return // Don't show success message
         }
+        } else {
+          console.warn('Canvas loadFromJSON not available but data exists')
+        }
       } else {
         const error = await response.json()
         alert(`Failed to load: ${error.error}`)
@@ -861,6 +1348,23 @@ export default function Whiteboard({
         </div>
       )}
       
+      {/* Connector mode indicator */}
+      {isConnectorMode && (
+        <div className="mb-4 p-3 bg-teal-50 border border-teal-200 rounded-lg">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 bg-teal-500 rounded-full animate-pulse"></div>
+              <span className="text-teal-700 font-medium">
+                Connector Mode Active - {connectorStart ? 'Click second point' : 'Click first point'}
+              </span>
+            </div>
+            <div className="text-sm text-teal-600">
+              Click anywhere to {connectorStart ? 'finish' : 'start'} connector
+            </div>
+          </div>
+        </div>
+      )}
+      
       <div className="toolbar mb-4 flex gap-2 flex-wrap">
         <button 
           onClick={enableDrawing}
@@ -910,6 +1414,17 @@ export default function Whiteboard({
           className="px-4 py-2 bg-pink-500 text-white rounded hover:bg-pink-600 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Chart
+        </button>
+        <button 
+          onClick={addConnector}
+          disabled={!isCanvasReady}
+          className={`px-4 py-2 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed ${
+            isConnectorMode 
+              ? 'bg-teal-700 hover:bg-teal-800 border-2 border-teal-300' 
+              : 'bg-teal-500 hover:bg-teal-600'
+          }`}
+        >
+          {isConnectorMode ? 'Exit Connector' : 'Connector'}
         </button>
         <button 
           onClick={showSaveDialog_handler}
@@ -1025,11 +1540,14 @@ export default function Whiteboard({
               {savedWhiteboards.map((board) => (
                 <div key={board._id} className="border border-gray-200 rounded-lg p-3 bg-white">
                   {board.thumbnail && (
-                    <img 
-                      src={board.thumbnail} 
-                      alt={board.name}
-                      className="w-full h-20 object-cover rounded mb-2"
-                    />
+                    <div className="relative w-full h-20 mb-2">
+                      <Image 
+                        src={board.thumbnail} 
+                        alt={board.name}
+                        fill
+                        className="object-cover rounded"
+                      />
+                    </div>
                   )}
                   <h4 className="font-medium text-sm mb-1 truncate">{board.name}</h4>
                   <p className="text-xs text-gray-500 mb-2">

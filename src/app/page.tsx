@@ -1,4 +1,4 @@
-import Whiteboard from "../components/whiteboard";
+import Whiteboard from "../components/whiteboard-new";
 
 export default function Home() {
   return (
